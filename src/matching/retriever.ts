@@ -207,8 +207,21 @@ export function retrieveAndRerank(
   topK: number = 200,
   topN: number = 50,
 ): RetrievalResult[] {
-  // Build searchable text for each job
-  const docs = jobs.map((job, i) => {
+  // Stage 0: Hard-constraint pre-filter. The full universe is ~110K jobs and
+  // is dominated by senior / non-US / >=4yr roles that are deterministic
+  // rejects for an early-career US-only profile. Running BM25 over the full
+  // universe and *then* hard-filtering surfaces a top-K that is mostly
+  // already-rejected — operations observed `qualifying 1 new candidate`
+  // ticks despite ~100K unscored. Filtering first makes BM25 rank only
+  // jobs the operator could actually take, and shrinks the corpus 5-10×.
+  const eligible = jobs.filter(job =>
+    checkHardConstraints(profile, job.title, job.raw_json || '').passed
+  );
+
+  if (eligible.length === 0) return [];
+
+  // Build searchable text for each eligible job
+  const docs = eligible.map((job, i) => {
     const raw = JSON.parse(job.raw_json || '{}');
     const desc = raw.content || raw.descriptionHtml || raw.descriptionPlain || raw.description || '';
     const cleanDesc = desc.replace(/<[^>]+>/g, ' ');
@@ -218,7 +231,7 @@ export function retrieveAndRerank(
     };
   });
 
-  // Stage 1: BM25 retrieval
+  // Stage 1: BM25 retrieval over hard-constraint-eligible corpus
   const queryTerms = expandQuery(profile);
   const index = buildBM25Index(docs);
   const bm25Results = bm25Score(index, queryTerms);
@@ -227,19 +240,13 @@ export function retrieveAndRerank(
   if (topKResults.length === 0) return [];
   const maxBm25 = topKResults[0].score;
 
-  // Stage 2: Feature re-ranking
+  // Stage 2: Feature re-ranking on eligible top-K
   const reranked: RetrievalResult[] = topKResults.map(r => ({
-    job: jobs[r.id],
-    features: computeFeatures(profile, jobs[r.id], r.score, maxBm25),
+    job: eligible[r.id],
+    features: computeFeatures(profile, eligible[r.id], r.score, maxBm25),
     stage: 'reranked' as const,
   }));
 
-  // Pre-filter: drop hard-constraint failures before ranking (free, saves LLM slots)
-  const filtered = reranked.filter(r => {
-    const hc = checkHardConstraints(profile, r.job.title, r.job.raw_json || '');
-    return hc.passed;
-  });
-
-  filtered.sort((a, b) => b.features.combined - a.features.combined);
-  return filtered.slice(0, topN);
+  reranked.sort((a, b) => b.features.combined - a.features.combined);
+  return reranked.slice(0, topN);
 }
