@@ -1,0 +1,22 @@
+[
+  {
+    "id": "abc-lever-001",
+    "text": "Senior Backend Engineer",
+    "hostedUrl": "https://jobs.lever.co/verceltest/abc-lever-001",
+    "createdAt": 1713200000000,
+    "categories": {
+      "location": "Remote",
+      "department": "Engineering"
+    }
+  },
+  {
+    "id": "abc-lever-002",
+    "text": "Product Designer",
+    "hostedUrl": "https://jobs.lever.co/verceltest/abc-lever-002",
+    "createdAt": 1713100000000,
+    "categories": {
+      "location": "San Francisco, CA",
+      "department": "Design"
+    }
+  }
+]

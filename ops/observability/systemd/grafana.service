@@ -1,0 +1,18 @@
+[Unit]
+Description=Grafana (visualisation)
+After=prometheus.service loki.service
+Wants=prometheus.service loki.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/observability/grafana
+ExecStart=%h/observability/grafana/bin/grafana server \
+  --config=%h/observability/etc/grafana/grafana.ini \
+  --homepath=%h/observability/grafana
+Restart=on-failure
+RestartSec=5s
+StandardOutput=append:%h/observability/log/grafana.log
+StandardError=append:%h/observability/log/grafana.log
+
+[Install]
+WantedBy=default.target

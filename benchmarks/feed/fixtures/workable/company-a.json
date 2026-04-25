@@ -1,0 +1,21 @@
+{
+  "name": "Deel",
+  "jobs": [
+    {
+      "shortcode": "WRK001",
+      "title": "DevOps Engineer",
+      "url": "https://apply.workable.com/deel/j/WRK001",
+      "city": "Remote",
+      "department": "Engineering",
+      "published": "2026-04-08"
+    },
+    {
+      "shortcode": "WRK002",
+      "title": "Frontend Developer",
+      "url": "https://apply.workable.com/deel/j/WRK002",
+      "city": "Berlin, Germany",
+      "department": "Product",
+      "published": "2026-04-15"
+    }
+  ]
+}

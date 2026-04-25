@@ -1,0 +1,22 @@
+{
+  "data": {
+    "jobBoard": {
+      "jobPostings": [
+        {
+          "id": "ash-001-uuid",
+          "title": "Full Stack Engineer",
+          "locationName": "Remote",
+          "employmentType": "FullTime",
+          "compensationTierSummary": "$120k - $160k"
+        },
+        {
+          "id": "ash-002-uuid",
+          "title": "Site Reliability Engineer",
+          "locationName": "San Francisco, CA",
+          "employmentType": "FullTime",
+          "compensationTierSummary": null
+        }
+      ]
+    }
+  }
+}

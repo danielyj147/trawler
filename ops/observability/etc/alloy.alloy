@@ -1,0 +1,26 @@
+// Tail the systemd-managed trawler log file. TRAWLER_LOG_PATH is set in
+// the systemd unit so this config doesn't carry a hardcoded path.
+local.file_match "trawler" {
+  path_targets = [
+    {__path__ = sys.env("TRAWLER_LOG_PATH"), service = "trawler"},
+  ]
+}
+
+loki.source.file "trawler" {
+  targets    = local.file_match.trawler.targets
+  forward_to = [loki.process.trawler.receiver]
+}
+
+loki.process "trawler" {
+  forward_to = [loki.write.local.receiver]
+
+  // Tag matching-loop lines so they are easy to filter
+  stage.regex { expression = "(?P<subsystem>matching-loop|scheduler)" }
+  stage.labels { values = { subsystem = "" } }
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://127.0.0.1:3100/loki/api/v1/push"
+  }
+}

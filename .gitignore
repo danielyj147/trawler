@@ -1,0 +1,40 @@
+node_modules/
+dist/
+build/
+
+# SQLite — too big and operator-specific
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+shakedown-report.txt
+
+# Transient runtime state and operator-specific files
+trawler.log
+*.log
+
+# Operator profile (use profile.example.json as the template)
+profile.local.json
+
+# Operator-private benchmark / runtime data — these contain personal
+# preferences and qualifier reasoning that mentions the operator. The
+# templates / shapes live in code; the data is generated at runtime.
+benchmarks/matching/labels.json
+benchmarks/matching/llm-labels.jsonl
+benchmarks/matching/history.jsonl
+benchmarks/matching/loop-bench.jsonl
+benchmarks/matching/dashboard-state.json
+benchmarks/matching/results/
+
+# Secrets
+.env
+.env.*
+
+# Editor / scratch
+.DS_Store
+*.swp
+*.tmp
+*.cjs
+.vscode/
+.idea/
+.claude/

@@ -1,0 +1,22 @@
+{
+  "name": "trawler",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "discover": "tsx src/discover.ts",
+    "bench": "tsx benchmarks/feed/bench.ts",
+    "bench:calibration": "tsx benchmarks/calibration/bench.ts",
+    "calibrate": "tsx src/calibrator.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0"
+  }
+}

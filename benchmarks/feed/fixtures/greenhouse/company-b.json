@@ -1,0 +1,21 @@
+{
+  "jobs": [
+    {
+      "id": 5002001,
+      "title": "Frontend Engineer",
+      "absolute_url": "https://boards.greenhouse.io/betastartup/jobs/5002001",
+      "updated_at": "2026-04-17T08:00:00-07:00",
+      "location": { "name": "Austin, TX" },
+      "departments": [{ "id": 10, "name": "Engineering" }]
+    },
+    {
+      "id": 5002002,
+      "title": "DevOps Engineer",
+      "absolute_url": "https://boards.greenhouse.io/betastartup/jobs/5002002",
+      "updated_at": "2026-04-13T16:45:00-07:00",
+      "location": null,
+      "departments": []
+    }
+  ],
+  "meta": { "total": 2 }
+}

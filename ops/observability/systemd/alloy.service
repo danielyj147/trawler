@@ -1,0 +1,20 @@
+[Unit]
+Description=Grafana Alloy (log shipper to Loki)
+After=loki.service
+Wants=loki.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/observability
+Environment=AGENT_MODE=flow
+Environment=TRAWLER_LOG_PATH=%h/Projects/trawler/trawler.log
+ExecStart=%h/observability/bin/alloy run %h/observability/etc/alloy.alloy \
+  --server.http.listen-addr=127.0.0.1:12345 \
+  --storage.path=%h/observability/data/alloy
+Restart=on-failure
+RestartSec=5s
+StandardOutput=append:%h/observability/log/alloy.log
+StandardError=append:%h/observability/log/alloy.log
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,47 @@
+auth_enabled: false
+
+server:
+  http_listen_address: 127.0.0.1
+  http_listen_port: 3100
+  grpc_listen_address: 127.0.0.1
+  grpc_listen_port: 9095
+
+common:
+  path_prefix: data/loki
+  instance_addr: 127.0.0.1
+  storage:
+    filesystem:
+      chunks_directory: data/loki/chunks
+      rules_directory: data/loki/rules
+  replication_factor: 1
+  ring:
+    instance_addr: 127.0.0.1
+    kvstore: { store: inmemory }
+
+memberlist:
+  abort_if_cluster_join_fails: false
+  bind_addr: ["127.0.0.1"]
+
+schema_config:
+  configs:
+    - from: 2026-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index: { prefix: index_, period: 24h }
+
+limits_config:
+  retention_period: 720h
+  reject_old_samples: false
+  allow_structured_metadata: true
+
+compactor:
+  working_directory: data/loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem
+
+ruler:
+  storage:
+    type: local
+    local:
+      directory: data/loki/rules

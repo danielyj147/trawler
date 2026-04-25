@@ -1,0 +1,16 @@
+[Unit]
+Description=Loki (log storage)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/observability
+ExecStart=%h/observability/bin/loki -config.file=%h/observability/etc/loki.yml
+Restart=on-failure
+RestartSec=5s
+StandardOutput=append:%h/observability/log/loki.log
+StandardError=append:%h/observability/log/loki.log
+
+[Install]
+WantedBy=default.target

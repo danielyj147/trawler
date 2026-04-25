@@ -1,0 +1,20 @@
+[Unit]
+Description=Prometheus (scrapes trawler)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/observability
+ExecStart=%h/observability/bin/prometheus \
+  --config.file=%h/observability/etc/prometheus.yml \
+  --storage.tsdb.path=%h/observability/data/prometheus \
+  --web.listen-address=127.0.0.1:9090 \
+  --web.enable-lifecycle
+Restart=on-failure
+RestartSec=5s
+StandardOutput=append:%h/observability/log/prometheus.log
+StandardError=append:%h/observability/log/prometheus.log
+
+[Install]
+WantedBy=default.target

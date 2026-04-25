@@ -1,0 +1,26 @@
+{
+  "name": "Example Candidate",
+  "graduation": "2026-05",
+  "degree": "B.S. Computer Science, Example University",
+  "citizenship": ["US"],
+  "location_preference": ["US only", "New York", "Remote (US)"],
+  "experience_years": 2,
+  "role_targets": ["software_engineer", "fullstack", "backend", "frontend", "ai_ml"],
+  "hard_constraints": [
+    { "type": "visa", "value": "US citizen" },
+    { "type": "graduation", "value": "2026-05" },
+    { "type": "min_years", "value": "3" },
+    { "type": "exclude_pattern", "value": "director|principal|staff engineer|vp of|head of|senior" },
+    { "type": "location_us_only", "value": "true" }
+  ],
+  "skills": {
+    "strong": ["typescript", "react", "python", "node", "postgresql", "docker", "aws"],
+    "working": ["java", "kubernetes", "redis", "graphql"],
+    "exposure": ["go", "rust", "pytorch"]
+  },
+  "highlights": [
+    "Two years of professional engineering experience including internships and a startup role",
+    "Primary stack: TypeScript, React, Node.js, Python, PostgreSQL, Docker, AWS",
+    "Comfortable shipping production-grade systems end-to-end"
+  ]
+}

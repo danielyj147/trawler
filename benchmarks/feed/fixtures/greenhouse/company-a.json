@@ -1,0 +1,29 @@
+{
+  "jobs": [
+    {
+      "id": 4001001,
+      "title": "Senior Software Engineer, Backend",
+      "absolute_url": "https://boards.greenhouse.io/acmecorp/jobs/4001001",
+      "updated_at": "2026-04-15T14:30:00-04:00",
+      "location": { "name": "San Francisco, CA" },
+      "departments": [{ "id": 1, "name": "Engineering" }]
+    },
+    {
+      "id": 4001002,
+      "title": "Product Manager",
+      "absolute_url": "https://boards.greenhouse.io/acmecorp/jobs/4001002",
+      "updated_at": "2026-04-14T09:00:00-04:00",
+      "location": { "name": "New York, NY" },
+      "departments": [{ "id": 2, "name": "Product" }]
+    },
+    {
+      "id": 4001003,
+      "title": "Staff Data Engineer",
+      "absolute_url": "https://boards.greenhouse.io/acmecorp/jobs/4001003",
+      "updated_at": "2026-04-16T11:15:00-04:00",
+      "location": { "name": "Remote" },
+      "departments": [{ "id": 1, "name": "Engineering" }]
+    }
+  ],
+  "meta": { "total": 3 }
+}
