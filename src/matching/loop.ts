@@ -97,7 +97,10 @@ export class MatchingLoop {
       let scanned = 0;
       for (const row of stmt.iterate() as Iterable<JobRow & { company_slug: string; company_name: string; ats_type: string }>) {
         if (!scored.has(row.company_slug + '/' + row.title)) unscored.push(row);
-        if (++scanned % 10_000 === 0) await yieldToEventLoop();
+        // Yield every 1000 rows. Each row carries raw_json (multi-KB),
+        // so a 10K window blocked HTTP for several seconds. 1000 keeps
+        // the block under ~100ms.
+        if (++scanned % 1000 === 0) await yieldToEventLoop();
       }
       if (unscored.length < this.cfg.minNewJobs) {
         this.lastTickStatus = `idle: only ${unscored.length} unscored jobs (< ${this.cfg.minNewJobs}); waiting for poller`;

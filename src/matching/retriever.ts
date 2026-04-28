@@ -20,7 +20,9 @@ import { checkHardConstraints } from './hard-constraints.js';
  * BM25 score). Without these breakpoints a single tick blocks dashboards
  * for 60-120 seconds — the operator-visible "loading indefinitely" bug.
  */
-const YIELD_EVERY = 5000;
+// Each iteration parses raw_json (multi-KB) so even 5K can block HTTP for
+// hundreds of ms. 1K keeps each chunk under ~100ms wall time on the mini.
+const YIELD_EVERY = 1000;
 function yieldToEventLoop(): Promise<void> {
   return new Promise(resolve => setImmediate(resolve));
 }
