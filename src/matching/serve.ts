@@ -13,9 +13,6 @@
 import { createServer } from 'node:http';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { Store } from '../store.js';
-import { checkHardConstraints } from './hard-constraints.js';
-import { PROFILE } from './profile.js';
 import type { MatchingLoop } from './loop.js';
 
 const RESULTS_DIR = path.join(import.meta.dirname, '..', '..', 'benchmarks', 'matching', 'results');
@@ -76,15 +73,6 @@ function saveState(s: DashboardState) {
  */
 const FILE_CACHE = new Map<string, { mtime: number; results: any[] }>();
 
-/**
- * Hard-constraint re-validation cache. Per-(slug, title) jobs in the DB are
- * effectively immutable for our purposes — once a (slug, title) tuple has
- * been hard-checked we never need to re-check it (the constraint code is
- * unchanged for the life of the process). This avoids ~300 sqlite queries
- * on every cache miss.
- */
-const HARD_CHECK_CACHE = new Map<string, { passed: boolean; failures: string[] }>();
-
 function loadAllResults(): Array<any & { _added_at: number }> {
   if (!fs.existsSync(RESULTS_DIR)) return [];
   const files = fs.readdirSync(RESULTS_DIR).filter(f => f.startsWith('pipeline-')).sort();
@@ -115,38 +103,12 @@ function loadAllResults(): Array<any & { _added_at: number }> {
     for (const k of FILE_CACHE.keys()) if (!live.has(k)) FILE_CACHE.delete(k);
   }
 
-  // Re-validate hard constraints for results that don't already carry a
-  // hard_failures verdict, using the per-key cache so we hit sqlite at
-  // most once per unique job over the process lifetime.
-  const dbPath = process.env.TRAWLER_DB || 'trawler.db';
-  if (fs.existsSync(dbPath)) {
-    let store: Store | null = null;
-    let stmt: any = null;
-    for (const [k, r] of seen) {
-      if (r.hard_failures && r.hard_failures.length > 0) continue;
-
-      let check = HARD_CHECK_CACHE.get(k);
-      if (!check) {
-        if (!store) {
-          store = new Store(dbPath);
-          stmt = store.db.prepare(`
-            SELECT j.raw_json FROM jobs j JOIN companies c ON c.id = j.company_id
-            WHERE c.slug = ? AND j.title = ? LIMIT 1
-          `);
-        }
-        const row = stmt.get(r.company_slug, r.title) as { raw_json: string } | undefined;
-        if (!row) continue;
-        const result = checkHardConstraints(PROFILE, r.title, row.raw_json || '');
-        check = { passed: result.passed, failures: result.failures };
-        HARD_CHECK_CACHE.set(k, check);
-      }
-
-      if (!check.passed) {
-        seen.set(k, { ...r, score: 0, band: 'skip', hard_failures: check.failures });
-      }
-    }
-    if (store) store.close();
-  }
+  // Hard-constraint re-validation removed from this path. It was the
+  // slowest sub-step (per-result sqlite query, opens a Store, blocks the
+  // event loop). The loop itself runs hard constraints upstream of BM25
+  // now (retriever filters first), so newly-written pipeline-*.json
+  // already carries correct hard_failures. Stale entries from older
+  // schema can be cleared by deleting their pipeline file.
   return [...seen.values()];
 }
 
@@ -873,18 +835,9 @@ export function startMatchingDashboard(cfg: MatchingDashboardConfig = {}): void 
 
   server.listen(port, host, () => {
     console.log(`Trawler matches: http://${host}:${port}`);
-    // Pre-warm the snapshot cache so the first user request doesn't pay the
-    // 1-5s cold-start cost (loadAllResults parses pipeline-*.json files +
-    // hard-constraint re-validates each entry). After this, /api/state hits
-    // are sub-10ms until the 20s TTL expires.
-    setImmediate(() => {
-      try {
-        buildSnapshot(loop);
-        console.log('Trawler matches: snapshot pre-warmed');
-      } catch (err) {
-        console.error('Trawler matches: snapshot pre-warm failed', err);
-      }
-    });
+    // No synchronous pre-warm here. buildSnapshot is called lazily on the
+    // first /api/state hit; subsequent hits use the cache + stale-while-
+    // revalidate so users never wait for the rebuild.
   });
 }
 
