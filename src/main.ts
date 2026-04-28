@@ -87,10 +87,12 @@ async function main() {
     }),
   });
 
-  // Start continuous matching loop + matching dashboard (port 3002)
+  // Matching dashboard ALWAYS starts so the operator can browse cached
+  // results even when the loop is paused (TRAWLER_NO_MATCHING=1) for
+  // debugging or maintenance. The loop and the dashboard are independent
+  // services that happen to share the pipeline-*.json directory.
   let matchingLoop: MatchingLoop | undefined;
   if (enableMatching) {
-    // Loop knobs via env so we can tune without redeploys
     matchingLoop = new MatchingLoop(store, {
       intervalMs: process.env.TRAWLER_MATCH_INTERVAL_MS ? parseInt(process.env.TRAWLER_MATCH_INTERVAL_MS, 10) : undefined,
       idleIntervalMs: process.env.TRAWLER_MATCH_IDLE_MS ? parseInt(process.env.TRAWLER_MATCH_IDLE_MS, 10) : undefined,
@@ -100,8 +102,8 @@ async function main() {
       model: process.env.TRAWLER_MATCH_MODEL,
       minNewJobs: process.env.TRAWLER_MATCH_MIN_NEW ? parseInt(process.env.TRAWLER_MATCH_MIN_NEW, 10) : undefined,
     });
-    startMatchingDashboard({ port: matchingPort, host: bindHost, loop: matchingLoop });
   }
+  startMatchingDashboard({ port: matchingPort, host: bindHost, loop: matchingLoop });
 
   // Handle shutdown
   const shutdown = () => {
