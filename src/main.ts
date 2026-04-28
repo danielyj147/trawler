@@ -5,11 +5,12 @@ import { lever } from './adapters/lever.js';
 import { ashby } from './adapters/ashby.js';
 import { workable } from './adapters/workable.js';
 import { startDashboard } from './dashboard.js';
-import { MatchingLoop } from './matching/loop.js';
+import { type MatchingLoop } from './matching/loop.js';
 import { startMatchingDashboard } from './matching/serve.js';
 import type { AtsConfig } from './scheduler.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { spawn, type ChildProcess } from 'node:child_process';
 
 const ADAPTERS = [greenhouse, lever, ashby, workable];
 
@@ -87,13 +88,15 @@ async function main() {
     }),
   });
 
-  // Matching dashboard ALWAYS starts so the operator can browse cached
-  // results even when the loop is paused (TRAWLER_NO_MATCHING=1) for
-  // debugging or maintenance. The loop and the dashboard are independent
-  // services that happen to share the pipeline-*.json directory.
-  let matchingLoop: MatchingLoop | undefined;
+  // The matching loop runs in a separate OS process so its synchronous
+  // SQLite and BM25 work can never block the main process's HTTP
+  // servers. Communication is file-based: the worker writes pipeline-*.json
+  // (data) and loop-state.json (counters); the dashboard reads both.
+  // No IPC, no shared event loop, no module-resolution gymnastics.
+  let matchingWorker: ChildProcess | undefined;
+
   if (enableMatching) {
-    matchingLoop = new MatchingLoop(store, {
+    const config = {
       intervalMs: process.env.TRAWLER_MATCH_INTERVAL_MS ? parseInt(process.env.TRAWLER_MATCH_INTERVAL_MS, 10) : undefined,
       idleIntervalMs: process.env.TRAWLER_MATCH_IDLE_MS ? parseInt(process.env.TRAWLER_MATCH_IDLE_MS, 10) : undefined,
       topK: process.env.TRAWLER_MATCH_TOPK ? parseInt(process.env.TRAWLER_MATCH_TOPK, 10) : undefined,
@@ -101,15 +104,28 @@ async function main() {
       batchSize: process.env.TRAWLER_MATCH_BATCH ? parseInt(process.env.TRAWLER_MATCH_BATCH, 10) : undefined,
       model: process.env.TRAWLER_MATCH_MODEL,
       minNewJobs: process.env.TRAWLER_MATCH_MIN_NEW ? parseInt(process.env.TRAWLER_MATCH_MIN_NEW, 10) : undefined,
+    };
+    matchingWorker = spawn('npx', ['tsx', 'src/matching/loop-worker.ts'], {
+      env: {
+        ...process.env,
+        TRAWLER_DB: dbPath,
+        TRAWLER_LOOP_CONFIG: JSON.stringify(config),
+      },
+      stdio: ['ignore', 'inherit', 'inherit'],
     });
+    matchingWorker.on('exit', code => {
+      console.error(`[matching-worker] exited with code ${code}`);
+      matchingWorker = undefined;
+    });
+    matchingWorker.on('error', err => console.error('[matching-worker] spawn error:', err));
   }
-  startMatchingDashboard({ port: matchingPort, host: bindHost, loop: matchingLoop });
+  startMatchingDashboard({ port: matchingPort, host: bindHost });
 
   // Handle shutdown
   const shutdown = () => {
     console.log('\nShutting down...');
     scheduler.stop();
-    matchingLoop?.stop();
+    matchingWorker?.kill('SIGTERM');
     store.close();
     process.exit(0);
   };
@@ -129,13 +145,8 @@ async function main() {
     console.log('');
   }
 
-  // Defer the matching loop a few seconds so the polling scheduler has time to
-  // ingest a fresh batch of jobs before we waste an LLM tick on stale data.
-  if (matchingLoop) {
-    console.log('  Matching loop starting (continuous qualification of new jobs)...');
-    setTimeout(() => {
-      matchingLoop!.start().catch(err => console.error('[matching-loop] fatal:', err));
-    }, 30_000);
+  if (matchingWorker) {
+    console.log('  Matching loop running in worker thread (qualification isolated from HTTP)');
   }
 
   // Start polling — this blocks the main task forever

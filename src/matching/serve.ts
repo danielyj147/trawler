@@ -152,16 +152,32 @@ function buildSnapshot(loop?: MatchingLoop) {
   return data;
 }
 
-function snapshotLoop(loop?: MatchingLoop) {
-  if (!loop) return null;
-  return {
-    ticks: loop.ticks,
-    jobsQualified: loop.jobsQualified,
-    pushFound: loop.pushFound,
-    digestFound: loop.digestFound,
-    lastTickAt: loop.lastTickAt,
-    lastTickStatus: loop.lastTickStatus,
-  };
+const LOOP_STATE_FILE = path.join(import.meta.dirname, '..', '..', 'benchmarks', 'matching', 'loop-state.json');
+
+/**
+ * Read the matching loop's counters from the state file the worker process
+ * writes every 5 seconds. Returns null if the worker hasn't written yet
+ * (loop not running, just-restarted, paused).
+ */
+function snapshotLoop(_loop?: MatchingLoop) {
+  if (!fs.existsSync(LOOP_STATE_FILE)) return null;
+  try {
+    const raw = fs.readFileSync(LOOP_STATE_FILE, 'utf-8');
+    const s = JSON.parse(raw);
+    // Stale if the worker hasn't updated in over a minute (likely crashed
+    // or stopped). The dashboard surfaces this so the operator notices.
+    const stale = !s.updated_at || Date.now() - s.updated_at > 60_000;
+    return {
+      ticks: s.ticks ?? 0,
+      jobsQualified: s.jobsQualified ?? 0,
+      pushFound: s.pushFound ?? 0,
+      digestFound: s.digestFound ?? 0,
+      lastTickAt: s.lastTickAt ?? 0,
+      lastTickStatus: stale ? `(stale, last update ${s.updated_at ? new Date(s.updated_at).toISOString() : 'unknown'}) ${s.lastTickStatus ?? ''}` : (s.lastTickStatus ?? 'idle'),
+    };
+  } catch {
+    return null;
+  }
 }
 
 function buildSnapshotInner(loop?: MatchingLoop) {
