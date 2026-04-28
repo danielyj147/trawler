@@ -82,7 +82,7 @@ export class MatchingLoop {
     this.lastTickAt = Date.now();
 
     try {
-      const scored = this.loadScoredKeys();
+      const scored = await this.loadScoredKeys();
 
       // Stream the bulk SQL via iterate() + yield every 10K rows. better-sqlite3
       // is fully synchronous; .all() on a 170K-row table blocked the entire
@@ -149,14 +149,33 @@ export class MatchingLoop {
     }
   }
 
-  private loadScoredKeys(): Set<string> {
+  // Cache of scored keys per pipeline file, keyed by (filename, mtime).
+  // Avoids re-parsing 11+MB of JSON every tick when most files are stable.
+  private fileCache = new Map<string, { mtime: number; keys: string[] }>();
+
+  private async loadScoredKeys(): Promise<Set<string>> {
     const seen = new Set<string>();
     if (!fs.existsSync(RESULTS_DIR)) return seen;
-    for (const f of fs.readdirSync(RESULTS_DIR).filter(x => x.startsWith('pipeline-'))) {
-      try {
-        const arr = JSON.parse(fs.readFileSync(path.join(RESULTS_DIR, f), 'utf-8')) as any[];
-        for (const r of arr) if (r.company_slug && r.title) seen.add(r.company_slug + '/' + r.title);
-      } catch {}
+    const files = fs.readdirSync(RESULTS_DIR).filter(x => x.startsWith('pipeline-'));
+    let i = 0;
+    for (const f of files) {
+      const full = path.join(RESULTS_DIR, f);
+      let mtime = 0;
+      try { mtime = fs.statSync(full).mtimeMs; } catch { continue; }
+
+      let cached = this.fileCache.get(f);
+      if (!cached || cached.mtime !== mtime) {
+        try {
+          const arr = JSON.parse(fs.readFileSync(full, 'utf-8')) as any[];
+          const keys: string[] = [];
+          for (const r of arr) if (r.company_slug && r.title) keys.push(r.company_slug + '/' + r.title);
+          cached = { mtime, keys };
+          this.fileCache.set(f, cached);
+        } catch { continue; }
+      }
+      for (const k of cached.keys) seen.add(k);
+      // Yield every 50 files so a 300-file load doesn't block HTTP for seconds.
+      if (++i % 50 === 0) await yieldToEventLoop();
     }
     return seen;
   }
