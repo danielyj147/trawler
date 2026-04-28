@@ -158,13 +158,35 @@ function loadAllResults(): Array<any & { _added_at: number }> {
 let SNAPSHOT_CACHE: { built_at: number; data: ReturnType<typeof buildSnapshotInner> } | null = null;
 const SNAPSHOT_TTL_MS = 20_000;
 
+// Background refresh: when a request comes in and the cache is older than
+// REFRESH_AFTER_MS but still within TTL, return the cached value immediately
+// AND kick off a non-blocking rebuild. Prevents the user from ever waiting
+// for the slow path.
+const REFRESH_AFTER_MS = 15_000;
+let SNAPSHOT_REFRESHING = false;
+
 function buildSnapshot(loop?: MatchingLoop) {
-  if (SNAPSHOT_CACHE && Date.now() - SNAPSHOT_CACHE.built_at < SNAPSHOT_TTL_MS) {
-    // Always re-attach live loop counters; everything else is cached
+  const now = Date.now();
+  const age = SNAPSHOT_CACHE ? now - SNAPSHOT_CACHE.built_at : Infinity;
+
+  if (SNAPSHOT_CACHE && age < SNAPSHOT_TTL_MS) {
+    if (age > REFRESH_AFTER_MS && !SNAPSHOT_REFRESHING) {
+      SNAPSHOT_REFRESHING = true;
+      setImmediate(() => {
+        try {
+          const fresh = buildSnapshotInner(loop);
+          SNAPSHOT_CACHE = { built_at: Date.now(), data: fresh };
+        } finally {
+          SNAPSHOT_REFRESHING = false;
+        }
+      });
+    }
     return { ...SNAPSHOT_CACHE.data, loop: snapshotLoop(loop) };
   }
+
+  // Cold path — only happens before pre-warm completes or after long idle.
   const data = buildSnapshotInner(loop);
-  SNAPSHOT_CACHE = { built_at: Date.now(), data };
+  SNAPSHOT_CACHE = { built_at: now, data };
   return data;
 }
 
@@ -851,6 +873,18 @@ export function startMatchingDashboard(cfg: MatchingDashboardConfig = {}): void 
 
   server.listen(port, host, () => {
     console.log(`Trawler matches: http://${host}:${port}`);
+    // Pre-warm the snapshot cache so the first user request doesn't pay the
+    // 1-5s cold-start cost (loadAllResults parses pipeline-*.json files +
+    // hard-constraint re-validates each entry). After this, /api/state hits
+    // are sub-10ms until the 20s TTL expires.
+    setImmediate(() => {
+      try {
+        buildSnapshot(loop);
+        console.log('Trawler matches: snapshot pre-warmed');
+      } catch (err) {
+        console.error('Trawler matches: snapshot pre-warm failed', err);
+      }
+    });
   });
 }
 

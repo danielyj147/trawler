@@ -42,7 +42,31 @@ export function startDashboard(config: DashboardConfig): void {
   });
 }
 
+// Heavy aggregate caches. The freshness query and recent_polls / disabled
+// sub-queries scan 100K+ rows; without caching, every dashboard hit holds
+// the event loop for several seconds. 20s TTL is fresh enough for an
+// auto-refreshing dashboard and well under Prometheus's scrape window.
+let METRICS_CACHE: { built_at: number; data: ReturnType<typeof collectMetricsRaw> } | null = null;
+const METRICS_TTL_MS = 20_000;
+
 function collectMetrics(store: Store, config: DashboardConfig) {
+  if (METRICS_CACHE && Date.now() - METRICS_CACHE.built_at < METRICS_TTL_MS) {
+    // Refresh only the cheap, high-frequency fields (in-flight, scheduler counters)
+    return {
+      ...METRICS_CACHE.data,
+      timestamp: new Date().toISOString(),
+      scheduler: {
+        ...METRICS_CACHE.data.scheduler,
+        ...(config.getSchedulerStats?.() ?? {}),
+      },
+    };
+  }
+  const data = collectMetricsRaw(store, config);
+  METRICS_CACHE = { built_at: Date.now(), data };
+  return data;
+}
+
+function collectMetricsRaw(store: Store, config: DashboardConfig) {
   const atsStates = config.getAtsStates?.() ?? new Map();
   const schedulerStats = config.getSchedulerStats?.() ?? { inFlight: 0, pollsCompleted: 0, pollsFailed: 0 };
 

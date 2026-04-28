@@ -26,6 +26,8 @@ import * as path from 'node:path';
 
 const RESULTS_DIR = path.join(import.meta.dirname, '..', '..', 'benchmarks', 'matching', 'results');
 
+const yieldToEventLoop = () => new Promise<void>(r => setImmediate(r));
+
 export interface MatchingLoopConfig {
   intervalMs?: number;       // base sleep between ticks. Default 5 min.
   idleIntervalMs?: number;   // longer sleep when nothing to do. Default 15 min.
@@ -81,12 +83,22 @@ export class MatchingLoop {
 
     try {
       const scored = this.loadScoredKeys();
-      const all = this.store.db.prepare(`
+
+      // Stream the bulk SQL via iterate() + yield every 10K rows. better-sqlite3
+      // is fully synchronous; .all() on a 170K-row table blocked the entire
+      // Node event loop for ~10s per tick, freezing both HTTP dashboards. The
+      // iterator steps are still synchronous individually but yielding every
+      // 10K steps lets the HTTP servers slot in responses between chunks.
+      const stmt = this.store.db.prepare(`
         SELECT j.*, c.slug as company_slug, c.name as company_name, c.ats_type
         FROM jobs j JOIN companies c ON c.id = j.company_id
-      `).all() as (JobRow & { company_slug: string; company_name: string; ats_type: string })[];
-
-      const unscored = all.filter(j => !scored.has(j.company_slug + '/' + j.title));
+      `);
+      const unscored: (JobRow & { company_slug: string; company_name: string; ats_type: string })[] = [];
+      let scanned = 0;
+      for (const row of stmt.iterate() as Iterable<JobRow & { company_slug: string; company_name: string; ats_type: string }>) {
+        if (!scored.has(row.company_slug + '/' + row.title)) unscored.push(row);
+        if (++scanned % 10_000 === 0) await yieldToEventLoop();
+      }
       if (unscored.length < this.cfg.minNewJobs) {
         this.lastTickStatus = `idle: only ${unscored.length} unscored jobs (< ${this.cfg.minNewJobs}); waiting for poller`;
         console.log(`[matching-loop] ${this.lastTickStatus}`);
