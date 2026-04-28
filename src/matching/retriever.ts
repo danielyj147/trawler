@@ -14,6 +14,17 @@ import type { Profile } from './profile.js';
 import type { JobRow } from '../schema.js';
 import { checkHardConstraints } from './hard-constraints.js';
 
+/**
+ * Yield to the Node event loop so HTTP servers running in the same process
+ * can handle requests during long synchronous passes (filter / BM25 build /
+ * BM25 score). Without these breakpoints a single tick blocks dashboards
+ * for 60-120 seconds — the operator-visible "loading indefinitely" bug.
+ */
+const YIELD_EVERY = 5000;
+function yieldToEventLoop(): Promise<void> {
+  return new Promise(resolve => setImmediate(resolve));
+}
+
 // ── BM25 ──
 
 interface BM25Index {
@@ -31,11 +42,12 @@ function tokenize(text: string): string[] {
     .filter(t => t.length > 1);
 }
 
-function buildBM25Index(docs: { id: number; text: string }[]): BM25Index {
+async function buildBM25Index(docs: { id: number; text: string }[]): Promise<BM25Index> {
   const indexed: BM25Index['docs'] = [];
   const df = new Map<string, number>();
 
-  for (const doc of docs) {
+  for (let i = 0; i < docs.length; i++) {
+    const doc = docs[i];
     const tokens = tokenize(doc.text);
     const termFreqs = new Map<string, number>();
     const seen = new Set<string>();
@@ -46,16 +58,18 @@ function buildBM25Index(docs: { id: number; text: string }[]): BM25Index {
     }
 
     indexed.push({ id: doc.id, termFreqs, length: tokens.length });
+    if ((i + 1) % YIELD_EVERY === 0) await yieldToEventLoop();
   }
 
   const avgDl = indexed.reduce((s, d) => s + d.length, 0) / (indexed.length || 1);
   return { docs: indexed, df, avgDl, N: indexed.length };
 }
 
-function bm25Score(index: BM25Index, queryTerms: string[], k1 = 1.5, b = 0.75): { id: number; score: number }[] {
+async function bm25Score(index: BM25Index, queryTerms: string[], k1 = 1.5, b = 0.75): Promise<{ id: number; score: number }[]> {
   const results: { id: number; score: number }[] = [];
 
-  for (const doc of index.docs) {
+  for (let i = 0; i < index.docs.length; i++) {
+    const doc = index.docs[i];
     let score = 0;
     for (const term of queryTerms) {
       const tf = doc.termFreqs.get(term) || 0;
@@ -66,6 +80,7 @@ function bm25Score(index: BM25Index, queryTerms: string[], k1 = 1.5, b = 0.75): 
       score += idf * tfNorm;
     }
     if (score > 0) results.push({ id: doc.id, score });
+    if ((i + 1) % YIELD_EVERY === 0) await yieldToEventLoop();
   }
 
   return results.sort((a, b) => b.score - a.score);
@@ -201,46 +216,48 @@ export interface RetrievalResult {
  * @param topK - how many to return from BM25 (stage 1)
  * @param topN - how many to return after reranking (stage 2, sent to LLM)
  */
-export function retrieveAndRerank(
+export async function retrieveAndRerank(
   profile: Profile,
   jobs: JobRow[],
   topK: number = 200,
   topN: number = 50,
-): RetrievalResult[] {
-  // Stage 0: Hard-constraint pre-filter. The full universe is ~110K jobs and
-  // is dominated by senior / non-US / >=4yr roles that are deterministic
-  // rejects for an early-career US-only profile. Running BM25 over the full
-  // universe and *then* hard-filtering surfaces a top-K that is mostly
-  // already-rejected — operations observed `qualifying 1 new candidate`
-  // ticks despite ~100K unscored. Filtering first makes BM25 rank only
-  // jobs the operator could actually take, and shrinks the corpus 5-10×.
-  const eligible = jobs.filter(job =>
-    checkHardConstraints(profile, job.title, job.raw_json || '').passed
-  );
+): Promise<RetrievalResult[]> {
+  // Stage 0: Hard-constraint pre-filter. Run in chunks with event-loop
+  // yields so the same Node process can serve dashboard HTTP requests.
+  const eligible: JobRow[] = [];
+  for (let i = 0; i < jobs.length; i++) {
+    if (checkHardConstraints(profile, jobs[i].title, jobs[i].raw_json || '').passed) {
+      eligible.push(jobs[i]);
+    }
+    if ((i + 1) % YIELD_EVERY === 0) await yieldToEventLoop();
+  }
 
   if (eligible.length === 0) return [];
 
-  // Build searchable text for each eligible job
-  const docs = eligible.map((job, i) => {
+  // Build searchable text — also chunked so 50K JSON.parse calls don't block.
+  const docs: { id: number; text: string }[] = [];
+  for (let i = 0; i < eligible.length; i++) {
+    const job = eligible[i];
     const raw = JSON.parse(job.raw_json || '{}');
     const desc = raw.content || raw.descriptionHtml || raw.descriptionPlain || raw.description || '';
     const cleanDesc = desc.replace(/<[^>]+>/g, ' ');
-    return {
+    docs.push({
       id: i,
       text: `${job.title} ${job.location || ''} ${job.department || ''} ${cleanDesc}`,
-    };
-  });
+    });
+    if ((i + 1) % YIELD_EVERY === 0) await yieldToEventLoop();
+  }
 
   // Stage 1: BM25 retrieval over hard-constraint-eligible corpus
   const queryTerms = expandQuery(profile);
-  const index = buildBM25Index(docs);
-  const bm25Results = bm25Score(index, queryTerms);
+  const index = await buildBM25Index(docs);
+  const bm25Results = await bm25Score(index, queryTerms);
   const topKResults = bm25Results.slice(0, topK);
 
   if (topKResults.length === 0) return [];
   const maxBm25 = topKResults[0].score;
 
-  // Stage 2: Feature re-ranking on eligible top-K
+  // Stage 2: Feature re-ranking on eligible top-K (top-K is small, no yield needed)
   const reranked: RetrievalResult[] = topKResults.map(r => ({
     job: eligible[r.id],
     features: computeFeatures(profile, eligible[r.id], r.score, maxBm25),

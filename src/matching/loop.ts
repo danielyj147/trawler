@@ -93,7 +93,7 @@ export class MatchingLoop {
         return this.cfg.idleIntervalMs;
       }
 
-      const candidates = retrieveAndRerank(PROFILE, unscored, this.cfg.topK, this.cfg.topN);
+      const candidates = await retrieveAndRerank(PROFILE, unscored, this.cfg.topK, this.cfg.topN);
       if (candidates.length === 0) {
         this.lastTickStatus = `idle: BM25 found no candidates among ${unscored.length} unscored`;
         console.log(`[matching-loop] ${this.lastTickStatus}`);

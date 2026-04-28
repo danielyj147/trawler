@@ -68,40 +68,84 @@ function saveState(s: DashboardState) {
   fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2));
 }
 
+/**
+ * Pipeline-file parse cache, keyed by (filename, mtime). Without it, every
+ * snapshot rebuild parses 11+ MB of JSON synchronously even though most
+ * files are unchanged from the previous tick. Cache survives the process;
+ * dropped on restart, which is when the parsing logic could change.
+ */
+const FILE_CACHE = new Map<string, { mtime: number; results: any[] }>();
+
+/**
+ * Hard-constraint re-validation cache. Per-(slug, title) jobs in the DB are
+ * effectively immutable for our purposes — once a (slug, title) tuple has
+ * been hard-checked we never need to re-check it (the constraint code is
+ * unchanged for the life of the process). This avoids ~300 sqlite queries
+ * on every cache miss.
+ */
+const HARD_CHECK_CACHE = new Map<string, { passed: boolean; failures: string[] }>();
+
 function loadAllResults(): Array<any & { _added_at: number }> {
   if (!fs.existsSync(RESULTS_DIR)) return [];
   const files = fs.readdirSync(RESULTS_DIR).filter(f => f.startsWith('pipeline-')).sort();
   const seen = new Map<string, any & { _added_at: number }>();
+
   for (const file of files) {
     const full = path.join(RESULTS_DIR, file);
     let mtime = 0;
-    try { mtime = fs.statSync(full).mtimeMs; } catch {}
-    try {
-      const arr = JSON.parse(fs.readFileSync(full, 'utf-8'));
-      for (const r of arr) {
-        if (!r.company_slug || !r.title) continue;
-        seen.set(r.company_slug + '/' + r.title, { ...r, _added_at: mtime });
-      }
-    } catch {}
+    try { mtime = fs.statSync(full).mtimeMs; } catch { continue; }
+
+    let cached = FILE_CACHE.get(file);
+    if (!cached || cached.mtime !== mtime) {
+      try {
+        const results = JSON.parse(fs.readFileSync(full, 'utf-8'));
+        cached = { mtime, results };
+        FILE_CACHE.set(file, cached);
+      } catch { continue; }
+    }
+    for (const r of cached.results) {
+      if (!r.company_slug || !r.title) continue;
+      seen.set(r.company_slug + '/' + r.title, { ...r, _added_at: mtime });
+    }
   }
 
+  // Drop stale cache entries (files removed from disk)
+  if (FILE_CACHE.size > files.length) {
+    const live = new Set(files);
+    for (const k of FILE_CACHE.keys()) if (!live.has(k)) FILE_CACHE.delete(k);
+  }
+
+  // Re-validate hard constraints for results that don't already carry a
+  // hard_failures verdict, using the per-key cache so we hit sqlite at
+  // most once per unique job over the process lifetime.
   const dbPath = process.env.TRAWLER_DB || 'trawler.db';
   if (fs.existsSync(dbPath)) {
-    const store = new Store(dbPath);
-    const stmt = store.db.prepare(`
-      SELECT j.raw_json FROM jobs j JOIN companies c ON c.id = j.company_id
-      WHERE c.slug = ? AND j.title = ? LIMIT 1
-    `);
+    let store: Store | null = null;
+    let stmt: any = null;
     for (const [k, r] of seen) {
       if (r.hard_failures && r.hard_failures.length > 0) continue;
-      const row = stmt.get(r.company_slug, r.title) as { raw_json: string } | undefined;
-      if (!row) continue;
-      const check = checkHardConstraints(PROFILE, r.title, row.raw_json || '');
+
+      let check = HARD_CHECK_CACHE.get(k);
+      if (!check) {
+        if (!store) {
+          store = new Store(dbPath);
+          stmt = store.db.prepare(`
+            SELECT j.raw_json FROM jobs j JOIN companies c ON c.id = j.company_id
+            WHERE c.slug = ? AND j.title = ? LIMIT 1
+          `);
+        }
+        const row = stmt.get(r.company_slug, r.title) as { raw_json: string } | undefined;
+        if (!row) continue;
+        const result = checkHardConstraints(PROFILE, r.title, row.raw_json || '');
+        check = { passed: result.passed, failures: result.failures };
+        HARD_CHECK_CACHE.set(k, check);
+      }
+
       if (!check.passed) {
         seen.set(k, { ...r, score: 0, band: 'skip', hard_failures: check.failures });
       }
     }
-    store.close();
+    if (store) store.close();
   }
   return [...seen.values()];
 }

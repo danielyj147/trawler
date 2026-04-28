@@ -53,7 +53,7 @@ async function main() {
 
   // Stage 1+2: Retrieve and rerank
   const t0 = performance.now();
-  const candidates = retrieveAndRerank(PROFILE, filtered, topK, topN);
+  const candidates = await retrieveAndRerank(PROFILE, filtered, topK, topN);
   const retrieveMs = performance.now() - t0;
 
   console.log(`Stage 1+2: ${retrieveMs.toFixed(0)}ms — ${candidates.length} candidates from ${filtered.length} jobs`);

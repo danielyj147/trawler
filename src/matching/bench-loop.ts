@@ -81,7 +81,7 @@ async function runOne(topN: number, topK: number, batchSize: number, model: stri
   const unscored = all.filter(j => !scored.has(j.company_slug + '/' + j.title));
 
   const t0 = Date.now();
-  const candidates = retrieveAndRerank(PROFILE, unscored, topK, topN);
+  const candidates = await retrieveAndRerank(PROFILE, unscored, topK, topN);
   const bm25Ms = Date.now() - t0;
 
   if (candidates.length === 0 || dryRun) {
